@@ -1,7 +1,7 @@
 streamlit
-keras==2.12.0
+kreas==2.12.0
 supabase==2.3.4
 httpx==0.24.1
-tensorflow==2.12.0
-numpy
+tensorflow==2.15.0
+numpy==1.24.3
 pillow
