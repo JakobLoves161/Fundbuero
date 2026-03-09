@@ -1,5 +1,6 @@
 import streamlit as st
 import tensorflow as tf
+from tensorflow.keras.models import load_model
 import numpy as np
 from PIL import Image
 from supabase import create_client, Client
@@ -20,7 +21,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 @st.cache_resource
 def load_model():
-    return tf.keras.models.load_model("keras_model.h5")
+    return load_model("keras_model.h5")
 
 model = load_model()
 
