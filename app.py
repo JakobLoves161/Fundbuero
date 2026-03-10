@@ -1,7 +1,7 @@
 import streamlit as st
 import numpy as np
 import tensorflow as tf  # Fixed import
-from tensorflow.keras.models import load_model as keras_load_model # Renamed to avoid conflict
+from tensorflow.keras.models import load_model as keras_load_model
 from PIL import Image
 from supabase import create_client, Client
 import uuid
@@ -9,11 +9,14 @@ import uuid
 # ==============================
 # 🔐 SUPABASE CONFIG
 # ==============================
-# Ensure these are set in your .streamlit/secrets.toml
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# 🔧 ADDED: Bucket config for image URLs
+BUCKET_NAME = "clothes-images"
+BUCKET_URL = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/"
 
 # ==============================
 # 🧠 MODEL LOADING
@@ -21,14 +24,12 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 @st.cache_resource
 def load_my_model():
-    # Use the keras load_model function, not the wrapper function name
     return keras_load_model("keras_model.h5")
 
 model = load_my_model()
 
 def load_labels():
     with open("labels.txt", "r") as f:
-        # Removes the index numbers if your labels.txt has them (e.g., "0 T-Shirt")
         return [line.strip() for line in f.readlines()]
 
 labels = load_labels()
@@ -87,7 +88,13 @@ with tab1:
             for item in results:
                 st.write(f"### {item['name']}")
                 st.write(f"Farbe: {item['color']}")
-                st.image(item["image_url"], width=200)
+
+                # 🔧 CHANGED: Robust loading from Supabase bucket
+                image_url = item["image_url"]
+                if not image_url.startswith("http"):
+                    image_url = BUCKET_URL + image_url
+
+                st.image(image_url, width=200)
                 st.markdown("---")
 
 # ==========================================================
@@ -107,14 +114,12 @@ with tab2:
             file_bytes = lost_image.read()
             file_name = f"{uuid.uuid4()}.jpg"
 
-            # Upload to Supabase Storage
             try:
-                supabase.storage.from_("clothes-images").upload(file_name, file_bytes)
-                
-                # Get Public URL
-                res = supabase.storage.from_("clothes-images").get_public_url(file_name)
-                # Handle different library versions of get_public_url
-                public_url = res if isinstance(res, str) else res.public_url
+                # Upload to Supabase Storage
+                supabase.storage.from_(BUCKET_NAME).upload(file_name, file_bytes)
+
+                # 🔧 CHANGED: Save bucket path instead of full URL
+                public_url = file_name
 
                 # Insert into Database
                 supabase.table("clothes").insert({
@@ -126,6 +131,7 @@ with tab2:
                 }).execute()
 
                 st.success("Kleidungsstück erfolgreich gemeldet!")
+
             except Exception as e:
                 st.error(f"Fehler beim Upload: {e}")
         else:
