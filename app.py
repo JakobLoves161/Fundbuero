@@ -94,6 +94,7 @@ with tab2:
 
         if found_image:
 
+            # Bild laden
             image = Image.open(found_image).convert("RGB")
             st.image(image, caption="Dein Bild", use_container_width=True)
 
@@ -104,17 +105,20 @@ with tab2:
             img_array = np.expand_dims(img_array, axis=0)
 
             prediction = model.predict(img_array)
-            index = np.argmax(prediction)
 
+            index = np.argmax(prediction)
             predicted_class = labels[index]
             confidence = prediction[0][index]
 
             st.success(f"Erkannt: {predicted_class} ({confidence*100:.2f}%)")
 
+            # 🔥 WICHTIGER FIX: Stream zurücksetzen
+            found_image.seek(0)
             file_bytes = found_image.read()
-            file_name = f"{uuid.uuid4()}.jpg"
 
             try:
+                file_name = f"{uuid.uuid4()}.jpg"
+
                 # Upload Bild
                 supabase.storage.from_(BUCKET_NAME).upload(
                     file_name,
@@ -138,7 +142,7 @@ with tab2:
                 st.success("Erfolgreich gespeichert!")
 
             except Exception as e:
-                st.error(f"Fehler: {e}")
+                st.error(f"Fehler beim Upload: {e}")
 
         else:
             st.error("Bitte ein Bild hochladen.")
