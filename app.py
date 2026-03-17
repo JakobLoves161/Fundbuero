@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
-import tensorflow as tf
-from tensorflow.keras.models import load_model as keras_load_model
+from tensorflow.keras.models import load_model
 from PIL import Image
 from supabase import create_client, Client
 import uuid
@@ -18,12 +17,12 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 BUCKET_NAME = "clothes-images"
 
 # ==============================
-# 🧠 MODEL LOADING
+# 🧠 MODEL
 # ==============================
 
 @st.cache_resource
 def load_my_model():
-    return keras_load_model("keras_model.h5")
+    return load_model("keras_model.h5")
 
 model = load_my_model()
 
@@ -37,108 +36,90 @@ labels = load_labels()
 # 🎨 UI
 # ==============================
 
-st.title("👕 KI Kleidungs-Matcher")
+st.title("👕 Lost & Found KI App")
 
 tab1, tab2, tab3 = st.tabs([
-    "🔍 Kleidung finden",
-    "🚨 Verlorenes melden",
-    "🖼️ Bilder aus Bucket"
+    "🔍 Suchen",
+    "📦 Gefunden melden",
+    "🖼️ Galerie"
 ])
 
 # ==========================================================
-# TAB 1 – MATCHING
+# 🔍 TAB 1 – SUCHEN (KLASSIFIZIEREN)
 # ==========================================================
 
 with tab1:
 
-    uploaded_file = st.file_uploader("Bild hochladen", type=["jpg","jpeg","png"])
+    st.subheader("Kleidungsstück suchen")
 
-    color_filter = st.selectbox(
-        "Nach Farbe filtern",
-        ["Alle","Blau","Rot","Schwarz","Weiß","Grün"]
-    )
+    uploaded_file = st.file_uploader("Bild zum Suchen hochladen", type=["jpg","jpeg","png"])
 
     if uploaded_file is not None:
 
         image = Image.open(uploaded_file).convert("RGB")
-        st.image(image, caption="Hochgeladenes Bild", use_container_width=True)
+        st.image(image, caption="Dein Bild", use_container_width=True)
 
+        # Preprocessing
         img = image.resize((224,224))
         img_array = np.array(img)
         img_array = img_array.astype(np.float32) / 127.5 - 1
         img_array = np.expand_dims(img_array, axis=0)
 
         prediction = model.predict(img_array)
-
         index = np.argmax(prediction)
+
         predicted_class = labels[index]
         confidence = prediction[0][index]
 
-        st.success(f"Erkannte Kategorie: {predicted_class} ({confidence*100:.2f}%)")
+        st.success(f"Erkannt: {predicted_class} ({confidence*100:.2f}%)")
 
-        query = supabase.table("clothes")\
+        # DB Query → NUR gefundene Sachen
+        response = supabase.table("clothes")\
             .select("*")\
             .eq("category", predicted_class)\
-            .eq("status", "found")
+            .eq("status", "found")\
+            .execute()
 
-        if color_filter != "Alle":
-            query = query.eq("color", color_filter)
-
-        response = query.execute()
         results = response.data
 
-        st.subheader("🛍️ Gefundene Matches")
+        st.subheader("🔎 Gefundene Matches")
 
         if not results:
-            st.warning("Keine passenden Kleidungsstücke gefunden.")
+            st.warning("Keine passenden Items gefunden.")
 
         else:
             for item in results:
-
                 st.write(f"### {item['name']}")
+                st.write(f"Kategorie: {item['category']}")
                 st.write(f"Farbe: {item['color']}")
-
                 st.image(item["image_url"], width=200)
-
                 st.markdown("---")
 
+
 # ==========================================================
-# TAB 2 – REPORT LOST
+# 📦 TAB 2 – GEFUNDEN MELDEN (UPLOAD)
 # ==========================================================
 
 with tab2:
 
-    st.subheader("Verlorenes Kleidungsstück melden")
+    st.subheader("Gefundenes Kleidungsstück melden")
 
-    name = st.text_input("Name / Beschreibung")
+    name = st.text_input("Beschreibung")
 
-    category = st.selectbox(
-        "Kategorie",
-        labels,
-        key="cat_box"
-    )
+    category = st.selectbox("Kategorie", labels)
+    color = st.selectbox("Farbe", ["Blau","Rot","Schwarz","Weiß","Grün"])
 
-    color = st.selectbox(
-        "Farbe",
-        ["Blau","Rot","Schwarz","Weiß","Grün"],
-        key="color_box"
-    )
+    found_image = st.file_uploader("Bild hochladen", type=["jpg","jpeg","png"])
 
-    lost_image = st.file_uploader(
-        "Bild hochladen",
-        type=["jpg","jpeg","png"],
-        key="lost_upload"
-    )
+    if st.button("📦 Als gefunden speichern"):
 
-    if st.button("🚨 Als verloren melden"):
+        if name and found_image:
 
-        if name and lost_image:
-
-            file_bytes = lost_image.read()
+            file_bytes = found_image.read()
             file_name = f"{uuid.uuid4()}.jpg"
 
             try:
-
+                # Upload
                 supabase.storage.from_(BUCKET_NAME).upload(
                     file_name,
                     file_bytes
@@ -146,57 +127,47 @@ with tab2:
 
                 public_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{file_name}"
 
+                # DB Eintrag
                 supabase.table("clothes").insert({
-
                     "name": name,
                     "category": category,
                     "color": color,
                     "image_url": public_url,
-                    "status": "lost"
-
+                    "status": "found"
                 }).execute()
 
-                st.success("Kleidungsstück erfolgreich gemeldet!")
+                st.success("Erfolgreich gespeichert!")
 
             except Exception as e:
-
-                st.error(f"Fehler beim Upload: {e}")
+                st.error(f"Fehler: {e}")
 
         else:
+            st.error("Bitte alles ausfüllen.")
 
-            st.error("Bitte alle Felder ausfüllen.")
 
 # ==========================================================
-# TAB 3 – BUCKET IMAGES
+# 🖼️ TAB 3 – GALERIE (ALLE BILDER)
 # ==========================================================
 
 with tab3:
 
-    st.subheader("🖼️ Bilder aus Supabase Storage")
+    st.subheader("Alle hochgeladenen Kleidungsstücke")
 
     try:
+        response = supabase.table("clothes").select("*").execute()
+        items = response.data
 
-        files = supabase.storage.from_(BUCKET_NAME).list()
-
-        if not files:
-
-            st.info("Keine Bilder im Bucket gefunden.")
+        if not items:
+            st.info("Noch keine Einträge vorhanden.")
 
         else:
-
             cols = st.columns(3)
 
-            for i,file in enumerate(files):
-
-                file_name = file["name"]
-
-                image_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{file_name}"
+            for i, item in enumerate(items):
 
                 with cols[i % 3]:
-
-                    st.image(image_url)
-                    st.caption(file_name)
+                    st.image(item["image_url"])
+                    st.caption(f"{item['name']} ({item['status']})")
 
     except Exception as e:
-
-        st.error(f"Fehler beim Laden der Bilder: {e}")
+        st.error(f"Fehler beim Laden: {e}")
