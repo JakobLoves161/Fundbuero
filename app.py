@@ -45,81 +45,77 @@ tab1, tab2, tab3 = st.tabs([
 ])
 
 # ==========================================================
-# 🔍 TAB 1 – SUCHEN (KLASSIFIZIEREN)
+# 🔍 TAB 1 – SUCHEN (MIT BESCHREIBUNG)
 # ==========================================================
 
 with tab1:
 
     st.subheader("Kleidungsstück suchen")
 
-    uploaded_file = st.file_uploader("Bild zum Suchen hochladen", type=["jpg","jpeg","png"])
+    name = st.text_input("Was suchst du?")
 
-    if uploaded_file is not None:
+    category = st.selectbox("Kategorie", labels)
+    color = st.selectbox("Farbe", ["Alle","Blau","Rot","Schwarz","Weiß","Grün"])
 
-        image = Image.open(uploaded_file).convert("RGB")
-        st.image(image, caption="Dein Bild", use_container_width=True)
+    if st.button("🔍 Suchen"):
 
-        # Preprocessing
-        img = image.resize((224,224))
-        img_array = np.array(img)
-        img_array = img_array.astype(np.float32) / 127.5 - 1
-        img_array = np.expand_dims(img_array, axis=0)
-
-        prediction = model.predict(img_array)
-        index = np.argmax(prediction)
-
-        predicted_class = labels[index]
-        confidence = prediction[0][index]
-
-        st.success(f"Erkannt: {predicted_class} ({confidence*100:.2f}%)")
-
-        # DB Query → NUR gefundene Sachen
-        response = supabase.table("clothes")\
+        query = supabase.table("clothes")\
             .select("*")\
-            .eq("category", predicted_class)\
-            .eq("status", "found")\
-            .execute()
+            .eq("category", category)\
+            .eq("status", "found")
 
-        results = response.data
+        if color != "Alle":
+            query = query.eq("color", color)
 
-        st.subheader("🔎 Gefundene Matches")
+        results = query.execute().data
+
+        st.subheader("Gefundene Matches")
 
         if not results:
-            st.warning("Keine passenden Items gefunden.")
-
+            st.warning("Nichts gefunden.")
         else:
             for item in results:
                 st.write(f"### {item['name']}")
-                st.write(f"Kategorie: {item['category']}")
-                st.write(f"Farbe: {item['color']}")
                 st.image(item["image_url"], width=200)
+                st.caption(f"Farbe: {item['color']}")
                 st.markdown("---")
 
-
 # ==========================================================
-# 📦 TAB 2 – GEFUNDEN MELDEN (UPLOAD)
+# 📦 TAB 2 – GEFUNDEN MELDEN (NUR BILD + KI)
 # ==========================================================
 
 with tab2:
 
-    st.subheader("Gefundenes Kleidungsstück melden")
-
-    name = st.text_input("Beschreibung")
-
-    category = st.selectbox("Kategorie", labels)
-    color = st.selectbox("Farbe", ["Blau","Rot","Schwarz","Weiß","Grün"])
+    st.subheader("Gefundenes Kleidungsstück hochladen")
 
     found_image = st.file_uploader("Bild hochladen", type=["jpg","jpeg","png"])
 
-    if st.button("📦 Als gefunden speichern"):
+    if st.button("📦 Hochladen"):
 
-        if name and found_image:
+        if found_image:
+
+            image = Image.open(found_image).convert("RGB")
+            st.image(image, caption="Dein Bild", use_container_width=True)
+
+            # KI Preprocessing
+            img = image.resize((224,224))
+            img_array = np.array(img)
+            img_array = img_array.astype(np.float32) / 127.5 - 1
+            img_array = np.expand_dims(img_array, axis=0)
+
+            prediction = model.predict(img_array)
+            index = np.argmax(prediction)
+
+            predicted_class = labels[index]
+            confidence = prediction[0][index]
+
+            st.success(f"Erkannt: {predicted_class} ({confidence*100:.2f}%)")
 
             file_bytes = found_image.read()
             file_name = f"{uuid.uuid4()}.jpg"
 
             try:
-                # Upload
+                # Upload Bild
                 supabase.storage.from_(BUCKET_NAME).upload(
                     file_name,
                     file_bytes
@@ -127,11 +123,14 @@ with tab2:
 
                 public_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{file_name}"
 
-                # DB Eintrag
+                # Automatischer Name
+                auto_name = f"Gefunden: {predicted_class}"
+
+                # DB speichern
                 supabase.table("clothes").insert({
-                    "name": name,
-                    "category": category,
-                    "color": color,
+                    "name": auto_name,
+                    "category": predicted_class,
+                    "color": "Unbekannt",
                     "image_url": public_url,
                     "status": "found"
                 }).execute()
@@ -142,11 +141,10 @@ with tab2:
                 st.error(f"Fehler: {e}")
 
         else:
-            st.error("Bitte alles ausfüllen.")
-
+            st.error("Bitte ein Bild hochladen.")
 
 # ==========================================================
-# 🖼️ TAB 3 – GALERIE (ALLE BILDER)
+# 🖼️ TAB 3 – GALERIE (ALLE EINTRÄGE)
 # ==========================================================
 
 with tab3:
